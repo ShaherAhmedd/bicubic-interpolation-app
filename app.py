@@ -1,17 +1,12 @@
+import streamlit as st
 import cv2
 import numpy as np
 import math
-import sys
 import time
-import os
-import tkinter as tk
-from tkinter import filedialog, messagebox
-from PIL import Image, ImageTk
 
 
-# ==============================
+
 # BICUBIC FUNCTIONS
-# ==============================
 
 def cubic_weight(x):
     a = -0.5
@@ -63,9 +58,9 @@ def manual_bicubic_cpu(image, scale_factor):
     return output
 
 
-# ==============================
+
 # GUI APP
-# ==============================
+
 
 class BicubicApp:
     def __init__(self, root):
@@ -265,9 +260,7 @@ class BicubicApp:
         )
 
 
-# ==============================
 # RUN APP
-# ==============================
 
 root = tk.Tk()
 app = BicubicApp(root)
