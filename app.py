@@ -4,264 +4,136 @@ import numpy as np
 import math
 import time
 
+st.set_page_config(page_title="Bicubic Interpolation", layout="wide")
 
+st.title("Bicubic Interpolation Image Scaling")
 
-# BICUBIC FUNCTIONS
-
-def cubic_weight(x):
+def kernel(x):
     a = -0.5
     x = abs(x)
 
     if x <= 1:
         return (a + 2) * (x ** 3) - (a + 3) * (x ** 2) + 1
-    elif x < 2:
+
+    if x < 2:
         return a * (x ** 3) - 5 * a * (x ** 2) + 8 * a * x - 4 * a
-    else:
-        return 0
+
+    return 0
 
 
-def manual_bicubic_cpu(image, scale_factor):
-    old_height, old_width, channels = image.shape
+def manual_bicubic(image, scale_factor):
+    h, w, channels = image.shape
+    new_h = int(h * scale_factor)
+    new_w = int(w * scale_factor)
 
-    new_height = int(old_height * scale_factor)
-    new_width = int(old_width * scale_factor)
+    result = np.zeros((new_h, new_w, channels), dtype=np.uint8)
 
-    output = np.zeros((new_height, new_width, channels), dtype=np.uint8)
+    for y in range(new_h):
+        for x in range(new_w):
+            old_x = x / scale_factor
+            old_y = y / scale_factor
 
-    for y_new in range(new_height):
-        for x_new in range(new_width):
-            x_old = x_new / scale_factor
-            y_old = y_new / scale_factor
-
-            x_base = math.floor(x_old)
-            y_base = math.floor(y_old)
+            base_x = math.floor(old_x)
+            base_y = math.floor(old_y)
 
             for c in range(channels):
-                pixel_value = 0.0
+                value = 0.0
 
                 for m in range(-1, 3):
                     for n in range(-1, 3):
-                        y_neighbor = min(max(y_base + m, 0), old_height - 1)
-                        x_neighbor = min(max(x_base + n, 0), old_width - 1)
+                        neighbor_y = min(max(base_y + m, 0), h - 1)
+                        neighbor_x = min(max(base_x + n, 0), w - 1)
 
-                        weight_y = cubic_weight(y_old - (y_base + m))
-                        weight_x = cubic_weight(x_old - (x_base + n))
+                        weight_y = kernel(old_y - (base_y + m))
+                        weight_x = kernel(old_x - (base_x + n))
 
-                        pixel_value += (
-                            image[y_neighbor, x_neighbor, c]
-                            * weight_x
-                            * weight_y
-                        )
+                        value += image[neighbor_y, neighbor_x, c] * weight_x * weight_y
 
-                output[y_new, x_new, c] = np.clip(pixel_value, 0, 255)
+                result[y, x, c] = np.clip(value, 0, 255)
 
-    return output
+    return result
 
 
+low_size = st.sidebar.slider("Low Resolution Size", 20, 200, 40)
+scale_factor = st.sidebar.slider("Scale Factor", 2, 10, 8)
 
-# GUI APP
+uploaded_file = st.file_uploader(
+    "Upload an image",
+    type=["jpg", "jpeg", "png", "bmp", "webp"]
+)
 
+if uploaded_file is not None:
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-class BicubicApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Bicubic Interpolation Image Scaling System")
-        self.root.geometry("1200x750")
+    if image is None:
+        st.error("Could not read the uploaded image.")
+        st.stop()
 
-        self.image_path = None
-        self.original_image = None
+    original_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        self.create_widgets()
+    st.subheader("Original Image")
+    st.image(original_rgb, width=350)
 
-    def create_widgets(self):
-        title = tk.Label(
-            self.root,
-            text="Bicubic Interpolation Image Scaling System",
-            font=("Arial", 20, "bold")
-        )
-        title.pack(pady=10)
+    low_res = cv2.resize(
+        image,
+        (low_size, low_size),
+        interpolation=cv2.INTER_AREA
+    )
 
-        controls_frame = tk.Frame(self.root)
-        controls_frame.pack(pady=10)
+    nearest = cv2.resize(
+        low_res,
+        None,
+        fx=scale_factor,
+        fy=scale_factor,
+        interpolation=cv2.INTER_NEAREST
+    )
 
-        self.choose_btn = tk.Button(
-            controls_frame,
-            text="Choose Image",
-            font=("Arial", 12),
-            command=self.choose_image
-        )
-        self.choose_btn.grid(row=0, column=0, padx=10)
+    bilinear = cv2.resize(
+        low_res,
+        None,
+        fx=scale_factor,
+        fy=scale_factor,
+        interpolation=cv2.INTER_LINEAR
+    )
 
-        tk.Label(
-            controls_frame,
-            text="Low Resolution Size:",
-            font=("Arial", 12)
-        ).grid(row=0, column=1, padx=5)
+    opencv_bicubic = cv2.resize(
+        low_res,
+        None,
+        fx=scale_factor,
+        fy=scale_factor,
+        interpolation=cv2.INTER_CUBIC
+    )
 
-        self.low_res_entry = tk.Entry(controls_frame, width=8)
-        self.low_res_entry.insert(0, "40")
-        self.low_res_entry.grid(row=0, column=2, padx=5)
+    start_time = time.time()
+    manual_result = manual_bicubic(low_res, scale_factor)
+    end_time = time.time()
 
-        tk.Label(
-            controls_frame,
-            text="Scale Factor:",
-            font=("Arial", 12)
-        ).grid(row=0, column=3, padx=5)
+    st.success(f"Manual bicubic finished in {round(end_time - start_time, 2)} seconds")
 
-        self.scale_entry = tk.Entry(controls_frame, width=8)
-        self.scale_entry.insert(0, "8")
-        self.scale_entry.grid(row=0, column=4, padx=5)
+    low_res_rgb = cv2.cvtColor(low_res, cv2.COLOR_BGR2RGB)
+    nearest_rgb = cv2.cvtColor(nearest, cv2.COLOR_BGR2RGB)
+    bilinear_rgb = cv2.cvtColor(bilinear, cv2.COLOR_BGR2RGB)
+    opencv_bicubic_rgb = cv2.cvtColor(opencv_bicubic, cv2.COLOR_BGR2RGB)
+    manual_rgb = cv2.cvtColor(manual_result, cv2.COLOR_BGR2RGB)
 
-        self.run_btn = tk.Button(
-            controls_frame,
-            text="Run Interpolation",
-            font=("Arial", 12, "bold"),
-            command=self.run_interpolation
-        )
-        self.run_btn.grid(row=0, column=5, padx=10)
+    st.subheader("Interpolation Results")
 
-        self.status_label = tk.Label(
-            self.root,
-            text="Choose an image to start.",
-            font=("Arial", 11),
-            fg="blue"
-        )
-        self.status_label.pack(pady=5)
+    col1, col2 = st.columns(2)
 
-        self.images_frame = tk.Frame(self.root)
-        self.images_frame.pack(pady=10)
+    with col1:
+        st.markdown("### Low Resolution Input")
+        st.image(low_res_rgb)
 
-        self.labels = {}
+        st.markdown("### Nearest Neighbor")
+        st.image(nearest_rgb)
 
-        names = [
-            "Low Resolution Input",
-            "Nearest Neighbor",
-            "Bilinear",
-            "OpenCV Bicubic",
-            "Manual Bicubic"
-        ]
+        st.markdown("### Bilinear")
+        st.image(bilinear_rgb)
 
-        for i, name in enumerate(names):
-            frame = tk.Frame(self.images_frame, bd=2, relief="groove")
-            frame.grid(row=i // 3, column=i % 3, padx=10, pady=10)
+    with col2:
+        st.markdown("### OpenCV Bicubic")
+        st.image(opencv_bicubic_rgb)
 
-            title = tk.Label(frame, text=name, font=("Arial", 12, "bold"))
-            title.pack()
-
-            img_label = tk.Label(frame, width=300, height=220)
-            img_label.pack()
-
-            self.labels[name] = img_label
-
-    def choose_image(self):
-        file_path = filedialog.askopenfilename(
-            title="Choose Image",
-            filetypes=[
-                ("Image Files", "*.jpg *.jpeg *.png *.bmp *.tiff *.webp"),
-                ("All Files", "*.*")
-            ]
-        )
-
-        if file_path:
-            self.image_path = file_path
-            self.original_image = cv2.imread(file_path)
-
-            if self.original_image is None:
-                messagebox.showerror("Error", "Could not read selected image.")
-                return
-
-            self.status_label.config(
-                text=f"Selected image: {os.path.basename(file_path)}"
-            )
-
-    def display_image(self, image, label):
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        pil_image = Image.fromarray(image_rgb)
-        pil_image.thumbnail((300, 220))
-
-        tk_image = ImageTk.PhotoImage(pil_image)
-
-        label.config(image=tk_image)
-        label.image = tk_image
-
-    def run_interpolation(self):
-        if self.original_image is None:
-            messagebox.showwarning("Warning", "Please choose an image first.")
-            return
-
-        try:
-            low_res_size = int(self.low_res_entry.get())
-            scale_factor = int(self.scale_entry.get())
-        except:
-            messagebox.showerror("Error", "Low resolution size and scale factor must be numbers.")
-            return
-
-        if low_res_size <= 0 or scale_factor <= 0:
-            messagebox.showerror("Error", "Values must be greater than zero.")
-            return
-
-        self.status_label.config(text="Processing... please wait.")
-        self.root.update()
-
-        image = self.original_image
-
-        low_res = cv2.resize(
-            image,
-            (low_res_size, low_res_size),
-            interpolation=cv2.INTER_AREA
-        )
-
-        nearest = cv2.resize(
-            low_res,
-            None,
-            fx=scale_factor,
-            fy=scale_factor,
-            interpolation=cv2.INTER_NEAREST
-        )
-
-        bilinear = cv2.resize(
-            low_res,
-            None,
-            fx=scale_factor,
-            fy=scale_factor,
-            interpolation=cv2.INTER_LINEAR
-        )
-
-        opencv_bicubic = cv2.resize(
-            low_res,
-            None,
-            fx=scale_factor,
-            fy=scale_factor,
-            interpolation=cv2.INTER_CUBIC
-        )
-
-        start_time = time.time()
-        manual_bicubic = manual_bicubic_cpu(low_res, scale_factor)
-        end_time = time.time()
-
-        output_folder = os.path.join(os.path.dirname(self.image_path), "bicubic_outputs")
-        os.makedirs(output_folder, exist_ok=True)
-
-        cv2.imwrite(os.path.join(output_folder, "01_low_resolution_input.png"), low_res)
-        cv2.imwrite(os.path.join(output_folder, "02_nearest_neighbor.png"), nearest)
-        cv2.imwrite(os.path.join(output_folder, "03_bilinear.png"), bilinear)
-        cv2.imwrite(os.path.join(output_folder, "04_opencv_bicubic.png"), opencv_bicubic)
-        cv2.imwrite(os.path.join(output_folder, "05_manual_bicubic.png"), manual_bicubic)
-
-        self.display_image(low_res, self.labels["Low Resolution Input"])
-        self.display_image(nearest, self.labels["Nearest Neighbor"])
-        self.display_image(bilinear, self.labels["Bilinear"])
-        self.display_image(opencv_bicubic, self.labels["OpenCV Bicubic"])
-        self.display_image(manual_bicubic, self.labels["Manual Bicubic"])
-
-        self.status_label.config(
-            text=f"Done. Manual bicubic time: {round(end_time - start_time, 2)} seconds. Outputs saved in bicubic_outputs folder."
-        )
-
-
-# RUN APP
-
-root = tk.Tk()
-app = BicubicApp(root)
-root.mainloop()
+        st.markdown("### Manual Bicubic")
+        st.image(manual_rgb)
